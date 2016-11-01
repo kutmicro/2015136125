@@ -1,30 +1,207 @@
-/*	RunningMan.ino	Created by Young-Bae Suh, 2015-06-02.	Find details at http://www.HardCopyWorld.com/gamemaker.html*/
+/*	
+         RunningMan.ino	
+	 Created by Young-Bae Suh, 2015-06-02.	
+	 Find details at http://www.HardCopyWorld.com/gamemaker.html
+*/
+
 #define SSD1306_I2C
-#include <SPI.h>#include <Wire.h>#include <avr/interrupt.h>#include <avr/eeprom.h>#include "Adafruit_GFX.h"#include "Adafruit_SSD1306.h"#include "bitmaps.h"#include "InputController.h"
-#ifndef SSD1306_I2C  #define CLK	13  #define MOSI	11  #define CS	6  #define DC	4  #define RST	12  Adafruit_SSD1306 display(MOSI, CLK, DC, RST, CS);#else  #define OLED_RESET 8  Adafruit_SSD1306 display(OLED_RESET);#endif
-// Systemint eepromAddr = 0;
-// Display variablesint HEIGHT = 64;int WIDTH = 128;int gameFPS = 1000/10; 
-// Time variablesunsigned long lTime;
-// Game status#define STATUS_MENU 0#define STATUS_PLAYING 1#define STATUS_PAUSED 2#define STATUS_RESULT 3#define STATUS_CREDIT 4
-int gameState = STATUS_MENU;    // Pause or notboolean gameEnd = false;unsigned long startTime = 0;int gameScore = 0;int prevGameScore = 0;int gameHighScore = 0;#define OBSTACLE_SCORE 1#define ENEMY_KILL_SCORE 2#define ITEM_SCORE 5
-// Input#define BUTTON_A 5#define BUTTON_B 6InputController inputController;bool up, down, left, right, aBut, bBut;
-// Menu#define MENU_START 1#define MENU_CREDIT 2#define MENU_MIN 1#define MENU_MAX 2int prevMenu = MENU_MAX;int currentMenu = 0;
-PROGMEM const char* stringTable[] = {  "Start game",  "Credit"};
-//////////////////////////////////////////////////// Game engine parameters//////////////////////////////////////////////////
-// Character parameters#define CHAR_WIDTH 24#define CHAR_HEIGHT 24#define CHAR_POS_X 20#define CHAR_POS_Y 38#define CHAR_COLLISION_MARGIN 3
-// Character status#define CHAR_RUN 1#define CHAR_JUMP 2#define CHAR_FIRE 3#define CHAR_DIE 4int charStatus = CHAR_RUN;
-// Run parameters#define RUN_IMAGE_MAX 2int charAniIndex = 1;int charAniDir = 1;boolean drawBg = true;
-// Jump parameters#define JUMP_MAX 20#define JUMP_STEP 4#define JUMP_IMAGE_INDEX 3#define FIRE_IMAGE_INDEX 4#define DIE_IMAGE_INDEX 5int charJumpIndex = 0;int charJumpDir = JUMP_STEP;int prevPosX = CHAR_POS_X;int prevPosY = CHAR_POS_Y;
-// Object parameters#define OBSTACLE_MAX 3#define OBSTACLE_MOVE 3#define OBSTACLE_WIDTH 3#define OBSTACLE_HEIGHT 4#define OBS_POS_Y 59#define OBSTACLE_DEL_THRESHOLD 5int obstacleX[] = {0, 0, 0};int obstacleCount = 0;unsigned long obstacleTime;
-#define ENEMY_MAX 1#define ENEMY_DELAY 4000#define ENEMY_MOVE 2#define ENEMY_WIDTH 16#define ENEMY_HEIGHT 16#define ENEMY_POS_Y 40#define ENEMY_START_X 128#define ENEMY_RUN_IMAGE_INDEX 0#define ENEMY_DIE_IMAGE_INDEX 1int enemyX[] = {0};int prevEnemyPosX[] = {0};int enemyCount = 0;unsigned long enemyTime;
-#define BULLET_MAX 1#define BULLET_MOVE 3#define BULLET_WIDTH 3#define BULLET_POS_Y 48#define BULLET_START_X 44int bulletX[] = {0};int prevBulletPosX[] = {0};int bulletCount = 0;unsigned long bulletTime;
 
-// Utilitiesint getOffset(int s);void initUserInput();void stopUntilUserInput();void setMenuMode();void setGameMode();void setResultMode();void setCreditMode();void checkInput();void updateMove();void checkCollision();void draw();unsigned long getRandTime();
+#include <SPI.h>
+#include <Wire.h>
+#include <avr/interrupt.h>
+#include <avr/eeprom.h>
+#include "Adafruit_GFX.h"
+#include "Adafruit_SSD1306.h"
+#include "bitmaps.h"
+#include "InputController.h"
+
+#ifndef SSD1306_I2C  
+  #define CLK	13  
+  #define MOSI	11  
+  #define CS	6  
+  #define DC	4  
+  #define RST	12  
+  Adafruit_SSD1306 display(MOSI, CLK, DC, RST, CS);
+#else  
+  #define OLED_RESET 8  
+  Adafruit_SSD1306 display(OLED_RESET);
+#endif
+
+// System
+int eepromAddr = 0;
+
+// Display variables
+int HEIGHT = 64;
+int WIDTH = 128;
+int gameFPS = 1000/10;
+
+// Time variables
+unsigned long lTime;
+
+// Game status
+#define STATUS_MENU 0
+#define STATUS_PLAYING 1
+#define STATUS_PAUSED 2
+#define STATUS_RESULT 3
+#define STATUS_CREDIT 4
+
+int gameState = STATUS_MENU;    // Pause or not
+boolean gameEnd = false;
+unsigned long startTime = 0;
+int gameScore = 0;
+int prevGameScore = 0;
+int gameHighScore = 0;
+#define OBSTACLE_SCORE 1
+#define ENEMY_KILL_SCORE 2
+#define ITEM_SCORE 5
+
+// Input
+#define BUTTON_A 5
+#define BUTTON_B 6
+InputController inputController;
+bool up, down, left, right, aBut, bBut;
+
+// Menu
+#define MENU_START 1
+#define MENU_CREDIT 2
+#define MENU_MIN 1
+#define MENU_MAX 2int prevMenu = MENU_MAX;
+int currentMenu = 0;
+
+PROGMEM const char* stringTable[] = {
+  "Start game",
+  "Credit"
+ };
+ 
+//////////////////////////////////////////////////
+// Game engine parameters
+//////////////////////////////////////////////////
+
+// Character parameters
+#define CHAR_WIDTH 24
+#define CHAR_HEIGHT 24
+#define CHAR_POS_X 20
+#define CHAR_POS_Y 38
+#define CHAR_COLLISION_MARGIN 3
+
+// Character status
+#define CHAR_RUN 1
+#define CHAR_JUMP 2
+#define CHAR_FIRE 3
+#define CHAR_DIE 4
+int charStatus = CHAR_RUN;
+
+// Run parameters
+#define RUN_IMAGE_MAX 2
+int charAniIndex = 1;
+int charAniDir = 1;
+boolean drawBg = true;
+
+// Jump parameters
+
+#define JUMP_MAX 20
+#define JUMP_STEP 4
+#define JUMP_IMAGE_INDEX 3
+#define FIRE_IMAGE_INDEX 4
+#define DIE_IMAGE_INDEX 5
+int charJumpIndex = 0;
+int charJumpDir = JUMP_STEP;
+int prevPosX = CHAR_POS_X;
+int prevPosY = CHAR_POS_Y;
+
+// Object parameters
+#define OBSTACLE_MAX 3
+#define OBSTACLE_MOVE 3
+#define OBSTACLE_WIDTH 3
+#define OBSTACLE_HEIGHT 4
+#define OBS_POS_Y 59
+#define OBSTACLE_DEL_THRESHOLD 5
+int obstacleX[] = {0, 0, 0};
+int obstacleCount = 0;
+unsigned long obstacleTime;
+
+#define ENEMY_MAX 1
+#define ENEMY_DELAY 4000
+#define ENEMY_MOVE 2
+#define ENEMY_WIDTH 16
+#define ENEMY_HEIGHT 16
+#define ENEMY_POS_Y 40
+#define ENEMY_START_X 128
+
+#define ENEMY_RUN_IMAGE_INDEX 0
+#define ENEMY_DIE_IMAGE_INDEX 1
+int enemyX[] = {0};
+int prevEnemyPosX[] = {0};
+int enemyCount = 0;
+unsigned long enemyTime;
+
+#define BULLET_MAX 1
+#define BULLET_MOVE 3
+#define BULLET_WIDTH 3
+#define BULLET_POS_Y 48
+#define BULLET_START_X 44
+int bulletX[] = {0};
+int prevBulletPosX[] = {0};
+int bulletCount = 0;
+unsigned long bulletTime;
+
+// Utilities
+int getOffset(int s);
+void initUserInput();
+void stopUntilUserInput();
+void setMenuMode();
+void setGameMode();
+void setResultMode();
+void setCreditMode();
+void checkInput();
+void updateMove();
+void checkCollision();
+void draw();
+unsigned long getRandTime();
 
 
-void setup() {	// Initialize display#ifndef SSD1306_I2C	SPI.begin();	display.begin(SSD1306_SWITCHCAPVCC);#else	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D (for the 128x64)#endif	display.setTextSize(1);	display.setTextColor(WHITE);	//digitalWrite( 17, LOW);    // what is this??
-	// set button pins as INPUT_PULLUP	pinMode(BUTTON_A,INPUT_PULLUP);	pinMode(BUTTON_B,INPUT_PULLUP);		// Read high score from eeprom	while (!eeprom_is_ready()); // Wait for EEPROM to be ready	cli();	gameHighScore = eeprom_read_word((uint16_t*)eepromAddr);	sei();	if(gameHighScore < 0 || gameHighScore > 65500) gameHighScore = 0;		// display startup animation	for(int i=-8; i<28; i=i+2) {		display.clearDisplay();		display.drawBitmap(46,i, arduino, 32,8,1);		display.display();	}	delay(2000);		// display main image	display.clearDisplay();	display.drawBitmap(0,0,nightrun,128,64,1);	display.display();		stopUntilUserInput();    // Wait until user touch the button
-	setMenuMode();  // Menu mode}
+
+void setup() {
+        // Initialize display
+#ifndef SSD1306_I2C
+        SPI.begin();
+	display.begin(SSD1306_SWITCHCAPVCC);
+#else
+        display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D (for the 128x64)
+#endif
+        display.setTextSize(1);
+	display.setTextColor(WHITE);
+	//digitalWrite( 17, LOW);    // what is this??
+	
+	// set button pins as INPUT_PULLUP
+	pinMode(BUTTON_A,INPUT_PULLUP);
+	pinMode(BUTTON_B,INPUT_PULLUP);	
+	
+	// Read high score from eeprom
+	while (!eeprom_is_ready()); // Wait for EEPROM to be ready	
+	cli();	
+	gameHighScore = eeprom_read_word((uint16_t*)eepromAddr);	
+	sei();	
+	if(gameHighScore < 0 || gameHighScore > 65500) gameHighScore = 0;		
+	
+	// display startup animation	
+	for(int i=-8; i<28; i=i+2) {		
+	        display.clearDisplay();
+		display.drawBitmap(46,i, arduino, 32,8,1);		
+		display.display();	
+		}	
+		delay(2000);		
+		
+		// display main image	
+		display.clearDisplay();	
+		display.drawBitmap(0,0,nightrun,128,64,1);	
+		display.display();		
+		
+		stopUntilUserInput();    // Wait until user touch the button
+
+                setMenuMode();  // Menu mode
+}
+
 
 void loop() {	uint8_t input = inputController.getInput();  // Get input status	if (input & (1<<5)) left = true;	if (input & (1<<4)) up = true;	if (input & (1<<3)) right = true;	if (input & (1<<2)) down = true;	if (input & (1<<1)) aBut = true;	// a button	if (input & (1<<0)) bBut = true;	// b button
 	if (millis() > lTime + gameFPS) {		lTime = millis();
